@@ -310,10 +310,10 @@ func TestClient_GenerateChatWithThink(t *testing.T) {
 			},
 		},
 		Stream: false,
+		Think:  true, // Enable reasoning mode (top-level parameter)
 		Options: Options{
 			Temperature: 0.0,
 			NumPredict:  100,
-			Think:       true, // Enable reasoning mode
 		},
 	}
 
@@ -333,27 +333,34 @@ func TestClient_GenerateChatWithThink(t *testing.T) {
 }
 
 func TestOptionsJSONMarshalWithThink(t *testing.T) {
-	// Test that the think parameter is properly marshaled to JSON
-	opts := Options{
-		Temperature: 0.5,
-		Think:       true,
+	// Test that the think parameter is properly marshaled to JSON at the request level
+	req := ChatRequest{
+		Model: "test",
+		Think: true,
+		Options: Options{
+			Temperature: 0.5,
+		},
 	}
 
-	data, err := json.Marshal(opts)
+	data, err := json.Marshal(req)
 	require.NoError(t, err)
 
-	// Check that the JSON contains the think field
+	// Check that the JSON contains the think field at the top level
 	var result map[string]interface{}
 	err = json.Unmarshal(data, &result)
 	require.NoError(t, err)
 
-	// Verify think field exists and is true
+	// Verify think field exists at top level and is true
 	think, exists := result["think"]
-	assert.True(t, exists, "think field should exist in JSON")
+	assert.True(t, exists, "think field should exist in JSON at top level")
 	assert.Equal(t, true, think, "think field should be true")
 
-	// Verify temperature field for completeness
-	temp, exists := result["temperature"]
-	assert.True(t, exists, "temperature field should exist in JSON")
+	// Verify temperature is in options object, not at top level
+	options, exists := result["options"]
+	assert.True(t, exists, "options field should exist in JSON")
+	optionsMap, ok := options.(map[string]interface{})
+	assert.True(t, ok, "options should be an object")
+	temp, exists := optionsMap["temperature"]
+	assert.True(t, exists, "temperature field should exist in options")
 	assert.Equal(t, float64(0.5), temp, "temperature should be 0.5")
 }
