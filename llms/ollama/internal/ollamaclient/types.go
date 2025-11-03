@@ -40,18 +40,44 @@ type GenerateRequest struct {
 
 type ImageData []byte
 
+// ToolCall represents a function call requested by the model.
+type ToolCall struct {
+	Function ToolFunction `json:"function"`
+}
+
+// ToolFunction represents the function details in a tool call.
+type ToolFunction struct {
+	Name      string         `json:"name"`
+	Arguments map[string]any `json:"arguments"`
+}
+
 type Message struct {
-	Role    string      `json:"role"` // one of ["system", "user", "assistant"]
-	Content string      `json:"content"`
-	Images  []ImageData `json:"images,omitempty"`
+	Role      string      `json:"role"` // one of ["system", "user", "assistant"]
+	Content   string      `json:"content"`
+	Images    []ImageData `json:"images,omitempty"`
+	ToolCalls []ToolCall  `json:"tool_calls,omitempty"`
+}
+
+// Tool represents a tool that can be used by the model.
+type Tool struct {
+	Type     string           `json:"type"`
+	Function FunctionTool     `json:"function"`
+}
+
+// FunctionTool represents a function tool definition.
+type FunctionTool struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Parameters  any    `json:"parameters"`
 }
 
 type ChatRequest struct {
 	Model     string     `json:"model"`
 	Messages  []*Message `json:"messages"`
 	Stream    bool       `json:"stream,omitempty"`
-	Format    string     `json:"format"`
+	Format    string     `json:"format,omitempty"`
 	KeepAlive string     `json:"keep_alive,omitempty"`
+	Tools     []Tool     `json:"tools,omitempty"`
 
 	Options Options `json:"options"`
 }

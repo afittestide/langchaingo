@@ -2,6 +2,7 @@ package ollama
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -155,12 +156,32 @@ func (o *LLM) GenerateContent(ctx context.Context, messages []llms.MessageConten
 			}
 		}
 	}
+
+	// Convert tools from llms.Tool to ollamaclient.Tool
+	var ollamaTools []ollamaclient.Tool
+	if len(opts.Tools) > 0 {
+		ollamaTools = make([]ollamaclient.Tool, 0, len(opts.Tools))
+		for _, tool := range opts.Tools {
+			if tool.Function != nil {
+				ollamaTools = append(ollamaTools, ollamaclient.Tool{
+					Type: tool.Type,
+					Function: ollamaclient.FunctionTool{
+						Name:        tool.Function.Name,
+						Description: tool.Function.Description,
+						Parameters:  tool.Function.Parameters,
+					},
+				})
+			}
+		}
+	}
+
 	req := &ollamaclient.ChatRequest{
 		Model:    model,
 		Format:   format,
 		Messages: chatMsgs,
 		Options:  ollamaOptions,
 		Stream:   opts.StreamingFunc != nil,
+		Tools:    ollamaTools,
 	}
 
 	keepAlive := o.options.keepAlive
@@ -170,6 +191,7 @@ func (o *LLM) GenerateContent(ctx context.Context, messages []llms.MessageConten
 
 	var fn ollamaclient.ChatResponseFunc
 	streamedResponse := ""
+	var streamedToolCalls []ollamaclient.ToolCall
 	var resp ollamaclient.ChatResponse
 
 	fn = func(response ollamaclient.ChatResponse) error {
@@ -180,12 +202,17 @@ func (o *LLM) GenerateContent(ctx context.Context, messages []llms.MessageConten
 		}
 		if response.Message != nil {
 			streamedResponse += response.Message.Content
+			// Accumulate tool calls from streaming responses
+			if len(response.Message.ToolCalls) > 0 {
+				streamedToolCalls = append(streamedToolCalls, response.Message.ToolCalls...)
+			}
 		}
 		if !req.Stream || response.Done {
 			resp = response
 			resp.Message = &ollamaclient.Message{
-				Role:    "assistant",
-				Content: streamedResponse,
+				Role:      "assistant",
+				Content:   streamedResponse,
+				ToolCalls: streamedToolCalls,
 			}
 		}
 		return nil
@@ -235,10 +262,37 @@ func (o *LLM) GenerateContent(ctx context.Context, messages []llms.MessageConten
 		genInfo["ThinkingEnabled"] = true
 	}
 
+	// Convert ollama tool calls to llms.ToolCall format
+	var toolCalls []llms.ToolCall
+	if resp.Message != nil && len(resp.Message.ToolCalls) > 0 {
+		toolCalls = make([]llms.ToolCall, 0, len(resp.Message.ToolCalls))
+		for i, tc := range resp.Message.ToolCalls {
+			// Ollama doesn't provide tool call IDs, so we generate one
+			id := fmt.Sprintf("call_%d", i)
+
+			// Convert arguments map to JSON string
+			argsBytes, err := json.Marshal(tc.Function.Arguments)
+			if err != nil {
+				// If marshaling fails, use empty JSON object
+				argsBytes = []byte("{}")
+			}
+
+			toolCalls = append(toolCalls, llms.ToolCall{
+				ID:   id,
+				Type: "function",
+				FunctionCall: &llms.FunctionCall{
+					Name:      tc.Function.Name,
+					Arguments: string(argsBytes),
+				},
+			})
+		}
+	}
+
 	choices := []*llms.ContentChoice{
 		{
 			Content:        content,
 			GenerationInfo: genInfo,
+			ToolCalls:      toolCalls,
 		},
 	}
 

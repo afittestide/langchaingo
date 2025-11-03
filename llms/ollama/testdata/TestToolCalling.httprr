@@ -1,0 +1,20 @@
+httprr trace v1
+770 667
+POST http://localhost:11434/api/chat HTTP/1.1
+Host: localhost:11434
+User-Agent: langchaingo-httprr
+Content-Length: 584
+Accept: application/x-ndjson
+Content-Type: application/json
+
+{"model":"llama3.2:1b","messages":[{"role":"user","content":"What is the weather today in Toronto?"}],"tools":[{"type":"function","function":{"name":"get_current_weather","description":"Get the current weather for a location","parameters":{"properties":{"format":{"description":"The format to return the weather in, e.g. 'celsius' or 'fahrenheit'","enum":["celsius","fahrenheit"],"type":"string"},"location":{"description":"The location to get the weather for, e.g. San Francisco, CA","type":"string"}},"required":["location","format"],"type":"object"}}}],"options":{"temperature":0}}HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/x-ndjson
+Date: Mon, 03 Nov 2025 11:16:21 GMT
+
+217
+{"model":"llama3.2:1b","created_at":"2025-11-03T11:16:21.817328Z","message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"get_current_weather","arguments":{"format":"celsius","location":"Toronto"}}}]},"done":false}
+{"model":"llama3.2:1b","created_at":"2025-11-03T11:16:21.846438Z","message":{"role":"assistant","content":""},"done_reason":"stop","done":true,"total_duration":3224477125,"load_duration":787059500,"prompt_eval_count":217,"prompt_eval_duration":1726333500,"eval_count":25,"eval_duration":709924458}
+
+0
+
