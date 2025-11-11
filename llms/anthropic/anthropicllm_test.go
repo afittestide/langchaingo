@@ -1,10 +1,12 @@
 package anthropic
 
 import (
+	"encoding/json"
 	"os"
 	"testing"
 
 	"github.com/tmc/langchaingo/llms"
+	"github.com/tmc/langchaingo/llms/anthropic/internal/anthropicclient"
 )
 
 func TestNew(t *testing.T) {
@@ -229,4 +231,119 @@ func TestGenerateMessagesContent_EmptyContent(t *testing.T) {
 	// Without the fix, accessing result.Content[0] would panic when Anthropic
 	// returns a response with nil or empty content (addresses issue #993)
 	t.Skip("Requires mock client - would demonstrate panic without len(result.Content) == 0 check")
+}
+
+func TestProcessAnthropicResponse_ToolCallsAndThinking(t *testing.T) {
+	payload := &anthropicclient.MessageResponsePayload{
+		Content: []anthropicclient.Content{
+			&anthropicclient.TextContent{Type: "text", Text: "Hello"},
+			&anthropicclient.ToolUseContent{
+				Type:  "tool_use",
+				ID:    "call_1",
+				Name:  "get_weather",
+				Input: map[string]any{"location": "San Francisco"},
+			},
+			&anthropicclient.TextContent{Type: "text", Text: " world"},
+			&anthropicclient.TextContent{Type: "text", Text: "<thinking>calc</thinking>Answer"},
+		},
+		StopReason: "tool_use",
+	}
+	payload.Usage.InputTokens = 12
+	payload.Usage.OutputTokens = 4
+
+	resp, err := processAnthropicResponse(payload)
+	if err != nil {
+		t.Fatalf("processAnthropicResponse() error = %v", err)
+	}
+
+	if len(resp.Choices) != 1 {
+		t.Fatalf("expected 1 choice, got %d", len(resp.Choices))
+	}
+
+	choice := resp.Choices[0]
+	expectedContent := "Hello world<thinking>calc</thinking>Answer"
+	if choice.Content != expectedContent {
+		t.Errorf("choice.Content = %q, want %q", choice.Content, expectedContent)
+	}
+
+	if choice.ReasoningContent != "calc" {
+		t.Errorf("choice.ReasoningContent = %q, want %q", choice.ReasoningContent, "calc")
+	}
+
+	if len(choice.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(choice.ToolCalls))
+	}
+
+	tc := choice.ToolCalls[0]
+	if tc.ID != "call_1" {
+		t.Errorf("tool call id = %q, want call_1", tc.ID)
+	}
+	if tc.FunctionCall == nil || tc.FunctionCall.Name != "get_weather" {
+		t.Fatalf("unexpected tool function: %+v", tc.FunctionCall)
+	}
+
+	var args map[string]any
+	if err := json.Unmarshal([]byte(tc.FunctionCall.Arguments), &args); err != nil {
+		t.Fatalf("failed to unmarshal tool call arguments: %v", err)
+	}
+	if args["location"] != "San Francisco" {
+		t.Errorf("tool call arguments location = %v, want San Francisco", args["location"])
+	}
+
+	outputContent, ok := choice.GenerationInfo["OutputContent"].(string)
+	if !ok {
+		t.Fatal("OutputContent missing from generation info")
+	}
+	if outputContent != "Hello worldAnswer" {
+		t.Errorf("OutputContent = %q, want %q", outputContent, "Hello worldAnswer")
+	}
+
+	thinkingContent, ok := choice.GenerationInfo["ThinkingContent"].(string)
+	if !ok {
+		t.Fatal("ThinkingContent missing from generation info")
+	}
+	if thinkingContent != "calc" {
+		t.Errorf("ThinkingContent = %q, want %q", thinkingContent, "calc")
+	}
+
+	if choice.FuncCall == nil || choice.FuncCall.Name != "get_weather" {
+		t.Fatalf("FuncCall not set correctly: %+v", choice.FuncCall)
+	}
+}
+
+func TestProcessAnthropicResponse_MetadataWithoutThinking(t *testing.T) {
+	payload := &anthropicclient.MessageResponsePayload{
+		Content: []anthropicclient.Content{
+			&anthropicclient.TextContent{Type: "text", Text: "Hello"},
+			&anthropicclient.TextContent{Type: "text", Text: " world"},
+		},
+		StopReason: "end_turn",
+	}
+
+	resp, err := processAnthropicResponse(payload)
+	if err != nil {
+		t.Fatalf("processAnthropicResponse() error = %v", err)
+	}
+
+	choice := resp.Choices[0]
+	expectedContent := "Hello world"
+	if choice.Content != expectedContent {
+		t.Errorf("choice.Content = %q, want %q", choice.Content, expectedContent)
+	}
+
+	outputContent, ok := choice.GenerationInfo["OutputContent"].(string)
+	if !ok {
+		t.Fatal("OutputContent missing from generation info")
+	}
+	if outputContent != expectedContent {
+		t.Errorf("OutputContent = %q, want %q", outputContent, expectedContent)
+	}
+
+	thinkingContent, ok := choice.GenerationInfo["ThinkingContent"].(string)
+	if !ok {
+		t.Fatal("ThinkingContent missing from generation info")
+	}
+	if thinkingContent != "" {
+		t.Errorf("ThinkingContent = %q, want empty string", thinkingContent)
+	}
 }
