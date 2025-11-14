@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tmc/langchaingo/internal/httprr"
 	"github.com/tmc/langchaingo/llms"
+	"github.com/tmc/langchaingo/llms/ollama/internal/ollamaclient"
 )
 
 func newTestClient(t *testing.T, opts ...Option) *LLM {
@@ -300,4 +301,169 @@ func TestWithPullTimeout(t *testing.T) {
 	if !strings.Contains(err.Error(), "deadline exceeded") {
 		t.Fatalf("Expected timeout error, got: %v", err)
 	}
+}
+
+func TestToolCalling(t *testing.T) {
+	ctx := context.Background()
+
+	llm := newTestClient(t, WithModel("llama3.2:1b"))
+
+	weatherTool := llms.Tool{
+		Type: "function",
+		Function: &llms.FunctionDefinition{
+			Name:        "get_current_weather",
+			Description: "Get the current weather for a location",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"location": map[string]any{
+						"type":        "string",
+						"description": "The location to get the weather for, e.g. San Francisco, CA",
+					},
+					"format": map[string]any{
+						"type":        "string",
+						"description": "The format to return the weather in, e.g. 'celsius' or 'fahrenheit'",
+						"enum":        []string{"celsius", "fahrenheit"},
+					},
+				},
+				"required": []string{"location", "format"},
+			},
+		},
+	}
+
+	content := []llms.MessageContent{
+		{
+			Role: llms.ChatMessageTypeHuman,
+			Parts: []llms.ContentPart{
+				llms.TextContent{Text: "What is the weather today in Toronto?"},
+			},
+		},
+	}
+
+	rsp, err := llm.GenerateContent(ctx, content, llms.WithTools([]llms.Tool{weatherTool}))
+	require.NoError(t, err)
+
+	assert.NotEmpty(t, rsp.Choices)
+	c1 := rsp.Choices[0]
+
+	// Check if tool calls are present
+	if len(c1.ToolCalls) > 0 {
+		t.Logf("Tool calls detected: %+v", c1.ToolCalls)
+		toolCall := c1.ToolCalls[0]
+		assert.Equal(t, "function", toolCall.Type)
+		assert.NotNil(t, toolCall.FunctionCall)
+		assert.Equal(t, "get_current_weather", toolCall.FunctionCall.Name)
+
+		// Parse arguments to verify structure
+		var args map[string]any
+		err := json.Unmarshal([]byte(toolCall.FunctionCall.Arguments), &args)
+		require.NoError(t, err)
+		assert.Contains(t, args, "location")
+		t.Logf("Tool call arguments: %+v", args)
+	} else {
+		t.Log("No tool calls returned (this may be expected if model doesn't support tools)")
+	}
+}
+
+func TestToolCallingStreaming(t *testing.T) {
+	ctx := context.Background()
+
+	// Use a model that supports tool calling
+	llm := newTestClient(t, WithModel("llama3.2:1b"))
+
+	// Define a weather tool
+	weatherTool := llms.Tool{
+		Type: "function",
+		Function: &llms.FunctionDefinition{
+			Name:        "get_current_weather",
+			Description: "Get the current weather for a location",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"location": map[string]any{
+						"type":        "string",
+						"description": "The location to get the weather for",
+					},
+				},
+				"required": []string{"location"},
+			},
+		},
+	}
+
+	content := []llms.MessageContent{
+		{
+			Role: llms.ChatMessageTypeHuman,
+			Parts: []llms.ContentPart{
+				llms.TextContent{Text: "What is the weather in Paris?"},
+			},
+		},
+	}
+
+	var streamedContent strings.Builder
+	streamFunc := func(ctx context.Context, chunk []byte) error {
+		streamedContent.Write(chunk)
+		return nil
+	}
+
+	rsp, err := llm.GenerateContent(ctx, content,
+		llms.WithTools([]llms.Tool{weatherTool}),
+		llms.WithStreamingFunc(streamFunc),
+	)
+	require.NoError(t, err)
+
+	assert.NotEmpty(t, rsp.Choices)
+	c1 := rsp.Choices[0]
+
+	// Check if tool calls are present
+	if len(c1.ToolCalls) > 0 {
+		t.Logf("Tool calls detected in streaming: %+v", c1.ToolCalls)
+		toolCall := c1.ToolCalls[0]
+		assert.Equal(t, "function", toolCall.Type)
+		assert.NotNil(t, toolCall.FunctionCall)
+		assert.Equal(t, "get_current_weather", toolCall.FunctionCall.Name)
+	} else {
+		t.Log("No tool calls returned in streaming (this may be expected)")
+	}
+
+	t.Logf("Streamed content: %s", streamedContent.String())
+}
+
+// TestToolCallTypes verifies the structure of tool call types in ollamaclient
+func TestToolCallTypes(t *testing.T) {
+	// Test ToolCall structure
+	toolCall := ollamaclient.ToolCall{
+		Function: ollamaclient.ToolFunction{
+			Name: "test_function",
+			Arguments: map[string]any{
+				"arg1": "value1",
+				"arg2": 42,
+			},
+		},
+	}
+
+	assert.Equal(t, "test_function", toolCall.Function.Name)
+	assert.Equal(t, "value1", toolCall.Function.Arguments["arg1"])
+	assert.Equal(t, 42, toolCall.Function.Arguments["arg2"])
+
+	// Test Tool structure
+	tool := ollamaclient.Tool{
+		Type: "function",
+		Function: ollamaclient.FunctionTool{
+			Name:        "my_function",
+			Description: "A test function",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"param1": map[string]any{
+						"type": "string",
+					},
+				},
+			},
+		},
+	}
+
+	assert.Equal(t, "function", tool.Type)
+	assert.Equal(t, "my_function", tool.Function.Name)
+	assert.Equal(t, "A test function", tool.Function.Description)
+	assert.NotNil(t, tool.Function.Parameters)
 }

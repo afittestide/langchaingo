@@ -1,0 +1,20 @@
+httprr trace v1
+600 642
+POST http://localhost:11434/api/chat HTTP/1.1
+Host: localhost:11434
+User-Agent: langchaingo-httprr
+Content-Length: 414
+Accept: application/x-ndjson
+Content-Type: application/json
+
+{"model":"llama3.2:1b","messages":[{"role":"user","content":"What is the weather in Paris?"}],"stream":true,"tools":[{"type":"function","function":{"name":"get_current_weather","description":"Get the current weather for a location","parameters":{"properties":{"location":{"description":"The location to get the weather for","type":"string"}},"required":["location"],"type":"object"}}}],"options":{"temperature":0}}HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Content-Type: application/x-ndjson
+Date: Mon, 03 Nov 2025 11:16:23 GMT
+
+1fe
+{"model":"llama3.2:1b","created_at":"2025-11-03T11:16:23.558877Z","message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"get_current_weather","arguments":{"location":"Paris"}}}]},"done":false}
+{"model":"llama3.2:1b","created_at":"2025-11-03T11:16:23.587621Z","message":{"role":"assistant","content":""},"done_reason":"stop","done":true,"total_duration":766585167,"load_duration":59099250,"prompt_eval_count":168,"prompt_eval_duration":88927250,"eval_count":22,"eval_duration":617821084}
+
+0
+
