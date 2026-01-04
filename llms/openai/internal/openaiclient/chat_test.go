@@ -122,3 +122,66 @@ func TestChatMessage_MarshalUnmarshal_WithReasoning(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, msg, msg2)
 }
+
+func TestParseToolCallsFromText(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name              string
+		input             string
+		expectedText      string
+		expectedToolCalls int
+		expectedFirstName string
+	}{
+		{
+			name:              "no tool call pattern",
+			input:             "Let me help you with that task.",
+			expectedText:      "Let me help you with that task.",
+			expectedToolCalls: 0,
+		},
+		{
+			name:              "tool call at end",
+			input:             "Let me check the files:functions.list_files:0{\"path\":\"/Users/test\"}",
+			expectedText:      "Let me check the files:",
+			expectedToolCalls: 1,
+			expectedFirstName: "list_files",
+		},
+		{
+			name:              "multiple tool calls",
+			input:             "Checking:functions.read_file:0{\"path\":\"test.go\"}functions.glob:1{\"pattern\":\"*.go\"}",
+			expectedText:      "Checking:",
+			expectedToolCalls: 2,
+			expectedFirstName: "read_file",
+		},
+		{
+			name:              "tool call only",
+			input:             "functions.read_file:0{\"path\":\"test.go\"}",
+			expectedText:      "",
+			expectedToolCalls: 1,
+			expectedFirstName: "read_file",
+		},
+		{
+			name:              "empty string",
+			input:             "",
+			expectedText:      "",
+			expectedToolCalls: 0,
+		},
+		{
+			name:              "text with colon but not tool call",
+			input:             "Here's the plan: step 1, step 2",
+			expectedText:      "Here's the plan: step 1, step 2",
+			expectedToolCalls: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleanText, toolCalls := parseToolCallsFromText(tt.input)
+			assert.Equal(t, tt.expectedText, cleanText)
+			assert.Equal(t, tt.expectedToolCalls, len(toolCalls))
+			if tt.expectedToolCalls > 0 && tt.expectedFirstName != "" {
+				assert.Equal(t, tt.expectedFirstName, toolCalls[0].Function.Name)
+			}
+		})
+	}
+}
